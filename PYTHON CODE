@@ -1,0 +1,331 @@
+ """                                                                        
+  DoD FY2027 RDT&E Budget — Hypersonic & Missile Defense Footprint
+  Mirrors the parse / dedupe / tag / aggregate logic in src/utils/parse.js                                                                                                     
+  Values are in $thousands unless noted.                                                                                                                                       
+  """                                                                                                                                                                          
+                                                                                                                                                                               
+  import csv                                                                                                                                                                   
+  import io                               
+  from collections import defaultdict
+
+  # ── Domain Definitions ─────────────────────────────────────────────────────────                                                                                            
+   
+  SPACE_SDA_PE = {                                                                                                                                                             
+      '1206446SF': {'sub': 'SDA Tracking Layer', 'label': 'Resilient Missile Warning / Tracking — LEO (PWSA)'},
+      '1206447SF': {'sub': 'SDA Tracking Layer', 'label': 'Resilient Missile Warning / Tracking — MEO (PWSA)'},                                                                
+  }                                                                                                                                                                            
+                                                                                                                                                                               
+  GOLDEN_DOME_PE = {                                                                                                                                                           
+      '1204159D8Z': 'Golden Dome — Space Programs',
+      '0604139D8Z': 'Golden Dome — MDA',                                                                                                                                       
+      '0603159D8Z': 'Golden Dome — DARPA',                                                                                                                                     
+      '0104159D8Z': 'Golden Dome — Directed Energy',                                                                                                                           
+      '0205159D8Z': 'Golden Dome — Army',                                                                                                                                      
+      '0207159D8Z': 'Golden Dome — Air Force',                                                                                                                                 
+      '0304159D8Z': 'Golden Dome — Intel & Security (USD I&S)',
+      '0901159D8Z': 'Golden Dome — Integration & Command',                                                                                                                     
+      '0604159D8Z': 'Golden Dome — SCO (Strategic Capabilities Office)',                                                                                                       
+      '0604250D8Z': 'Golden Dome — Advanced Innovative Technologies',                                                                                                          
+  }                                                                                                                                                                            
+                                          
+  EARTH_OFFENSIVE_PE = {                                                                                                                                                       
+      '0605518N':   {'sub': 'Offensive Strike', 'label': 'Conventional Prompt Strike (CPS)'},
+      '0604183F':   {'sub': 'Offensive Strike', 'label': 'Hypersonic Attack Cruise Missile (HACM)'},                                                                           
+      '0604033F':   {'sub': 'Offensive Strike', 'label': 'Air Force Hypersonics Prototyping'},                                                                                 
+      '0605232A':   {'sub': 'Offensive Strike', 'label': 'Long Range Hypersonic Weapon — LRHW (EMD)'},                                                                         
+      '0604135A':   {'sub': 'Offensive Strike', 'label': 'Strategic Mid-Range Fires (Army)'},                                                                                  
+      '0605235A':   {'sub': 'Offensive Strike', 'label': 'Strategic Mid-Range Capability (Army)'},                                                                             
+      '0604182A':   {'sub': 'Offensive Strike', 'label': 'Army Hypersonics (Adv. Dev.)'},                                                                                      
+      '0603183D8Z': {'sub': 'Offensive Strike', 'label': 'Joint Hypersonic Technology Dev & Transition'},                                                                      
+      '0603464A':   {'sub': 'Offensive Strike', 'label': 'Long Range Precision Fires Adv. Technology'},                                                                        
+  }                                                                                                                                                                            
+                                                                                                                                                                               
+  EARTH_MDA_PE = {                                                                                                                                                             
+      '0603896C': {'sub': 'C2BMC',             'label': 'C2BMC — Command & Control, Battle Mgmt & Comms'},
+      '0603904C': {'sub': 'C2BMC',             'label': 'Missile Defense Integration & Operations Ctr (MDIOC)'},                                                               
+      '0603898C': {'sub': 'C2BMC',             'label': 'BMD Joint Warfighter Support'},                                                                                       
+      '0603884C': {'sub': 'BMD Sensors',       'label': 'Ballistic Missile Defense Sensors'},                                                                                  
+      '0604873C': {'sub': 'BMD Sensors',       'label': 'Long Range Discrimination Radar (LRDR)'},                                                                             
+      '0603907C': {'sub': 'BMD Sensors',       'label': 'Sea Based X-Band Radar (SBX)'},                                                                                       
+      '0604878C': {'sub': 'BMD Sensors',       'label': 'Aegis BMD Test'},                                                                                                     
+      '0604879C': {'sub': 'BMD Sensors',       'label': 'BMD Sensor Test'},                                                                                                    
+      '1206895C': {'sub': 'BMD Sensors',       'label': 'BMD Space Programs (MDA)'},                                                                                           
+      '0603882C': {'sub': 'Ground Defense',    'label': 'BMD Midcourse Defense Segment'},                                                                                      
+      '0603892C': {'sub': 'Ground Defense',    'label': 'Aegis BMD'},                                                                                                          
+      '0604874C': {'sub': 'Ground Defense',    'label': 'Improved Homeland Defense Interceptors (NGI)'},                                                                       
+      '0603881C': {'sub': 'Ground Defense',    'label': 'BMD Terminal Defense Segment'},                                                                                       
+      '0603890C': {'sub': 'Ground Defense',    'label': 'BMD Enabling Programs'},
+      '0604102C': {'sub': 'Ground Defense',    'label': 'Guam Defense Development'},                                                                                           
+      '0604880C': {'sub': 'Ground Defense',    'label': 'Land-Based SM-3 (LBSM3)'},                                                                                            
+      '0604181C': {'sub': 'Ground Defense',    'label': 'Hypersonic Defense (MDA)'},                                                                                           
+      '0603914C': {'sub': 'BMD Test',          'label': 'Ballistic Missile Defense Test'},                                                                                     
+      '0603915C': {'sub': 'BMD Test',          'label': 'Ballistic Missile Defense Targets'},                                                                                  
+      '0604887C': {'sub': 'BMD Test',          'label': 'BMD Midcourse Segment Test'},                                                                                         
+      '0604876C': {'sub': 'BMD Test',          'label': 'BMD Terminal Defense Segment Test'},                                                                                  
+      '0602203F': {'sub': 'Test Infrastructure','label': 'Aerospace Systems Technologies (AFRL)'},                                                                             
+      '0606002A': {'sub': 'Test Infrastructure','label': 'Ronald Reagan BMD Test Site'},                                                                                       
+      '0605301A': {'sub': 'Test Infrastructure','label': 'Army Kwajalein Atoll'},                                                                                              
+      '0603906C': {'sub': 'MDA Programs',      'label': 'Regarding Trench'},                                                                                                   
+      '0604115C': {'sub': 'MDA Programs',      'label': 'BMD Technology Maturation Initiatives'},                                                                              
+  }                                                                                                                                                                            
+                                                                                                                                                                               
+                                                                                                                                                                               
+  # ── Helpers ────────────────────────────────────────────────────────────────────                                                                                            
+                                          
+  def parse_num(val: str) -> float:                                                                                                                                            
+      """Strip commas/dollar signs and return float. Empty → 0."""
+      if not val:                                                                                                                                                              
+          return 0.0                      
+      try:                                                                                                                                                                     
+          return float(val.replace(',', '').replace('$', '').replace(' ', ''))
+      except ValueError:                                                                                                                                                       
+          return 0.0
+                                                                                                                                                                               
+                                          
+  def get_service(row: dict) -> str:
+      if row['account'] == '3007D':
+          return 'Golden Dome'                                                                                                                                                 
+      if row['org'] == 'MDA':
+          return 'MDA'                                                                                                                                                         
+      if row['org'] == 'DARPA':           
+          return 'DARPA'                                                                                                                                                       
+      if 'Space Force' in row['account_title']:
+          return 'Space Force'                                                                                                                                                 
+      if 'Air Force' in row['account_title']:                                                                                                                                  
+          return 'Air Force'
+      if 'Army' in row['account_title']:                                                                                                                                       
+          return 'Army'                   
+      if 'Navy' in row['account_title']:
+          return 'Navy'
+      if row['org'] == 'OSD':                                                                                                                                                  
+          return 'OSD'
+      if row['org']:                                                                                                                                                           
+          return row['org']               
+      return 'Defense-Wide'
+                                                                                                                                                                               
+  
+  def fmt(n: float, decimals: int = 1) -> str:                                                                                                                                 
+      """Format $thousands value as $M / $B / $T string."""
+      if n >= 1_000_000:                                                                                                                                                       
+          return f"${n / 1_000_000:.{decimals}f}T"                                                                                                                             
+      if n >= 1_000:                                                                                                                                                           
+          return f"${n / 1_000:.{decimals}f}B"                                                                                                                                 
+      if n >= 1:                                                                                                                                                               
+          return f"${n:.0f}M"
+      return "$0"                                                                                                                                                              
+                                          
+                                                                                                                                                                               
+  def to_m(n: float) -> float:
+      """$thousands → $millions."""                                                                                                                                            
+      return n / 1_000                    
+
+                                                                                                                                                                               
+  # ── Parser ─────────────────────────────────────────────────────────────────────
+                                                                                                                                                                               
+  def parse_csv(path: str) -> list[dict]: 
+      """
+      Parse the DoD RDT&E Exhibit R-1 CSV.
+      Row 0 = aggregate totals (skip)                                                                                                                                          
+      Row 1 = column headers                                                                                                                                                   
+      Row 2+ = data                                                                                                                                                            
+      """                                                                                                                                                                      
+      rows = []                           
+      with open(path, newline='', encoding='utf-8-sig') as f:                                                                                                                  
+          reader = csv.reader(f)
+          all_rows = list(reader)                                                                                                                                              
+                                          
+      # Row index 1 is the header row; data starts at index 2                                                                                                                  
+      for line in all_rows[2:]:
+          if len(line) < 17:                                                                                                                                                   
+              continue                    
+          row = {
+              'account':              line[0].strip(),
+              'account_title':        line[1].strip(),                                                                                                                         
+              'org':                  line[2].strip(),
+              'budget_activity':      line[3].strip(),                                                                                                                         
+              'budget_activity_title':line[4].strip(),                                                                                                                         
+              'line_num':             line[5].strip(),
+              'pe':                   line[6].strip(),                                                                                                                         
+              'title':                line[7].strip(),                                                                                                                         
+              'in_toa':               line[8].strip() == 'Y',
+              'fy25_actuals':         parse_num(line[9]),                                                                                                                      
+              'fy25_total':           parse_num(line[11]),                                                                                                                     
+              'fy26_enacted':         parse_num(line[12]),                                                                                                                     
+              'fy26_spend_plan':      parse_num(line[13]),                                                                                                                     
+              'fy26_total':           parse_num(line[14]),                                                                                                                     
+              'fy27_request':         parse_num(line[15]),
+              'fy27_mandatory':       parse_num(line[16]),                                                                                                                     
+              'fy27_total':           parse_num(line[17]) if len(line) > 17 else 0.0,
+          }                                                                                                                                                                    
+          row['service'] = get_service(row)
+          rows.append(row)                                                                                                                                                     
+                                          
+      return rows
+
+                                                                                                                                                                               
+  # ── De-duplication ─────────────────────────────────────────────────────────────
+                                                                                                                                                                               
+  def dedupe_by_pe(rows: list[dict]) -> list[dict]:
+      """
+      Group by PE/BLI code.
+      - Golden Dome (account 3007D): SUM all budget activities per PE (genuinely additive).                                                                                    
+      - All others: keep the row with the highest FY27 Total per PE (avoid pass-through double-count).                                                                         
+      """                                                                                                                                                                      
+      gd_by_pe: dict[str, dict] = {}                                                                                                                                           
+      regular_by_pe: dict[str, dict] = {}                                                                                                                                      
+                                          
+      SUM_FIELDS = ('fy25_total', 'fy26_total', 'fy27_total', 'fy27_request', 'fy27_mandatory')                                                                                
+  
+      for row in rows:                                                                                                                                                         
+          pe = row['pe']                  
+          if row['account'] == '3007D':
+              if pe not in gd_by_pe:
+                  gd_by_pe[pe] = dict(row)
+              else:                                                                                                                                                            
+                  for f in SUM_FIELDS:
+                      gd_by_pe[pe][f] += row[f]                                                                                                                                
+          else:                           
+              if pe not in regular_by_pe or row['fy27_total'] > regular_by_pe[pe]['fy27_total']:                                                                               
+                  regular_by_pe[pe] = row
+                                                                                                                                                                               
+      return list(gd_by_pe.values()) + list(regular_by_pe.values())                                                                                                            
+  
+                                                                                                                                                                               
+  # ── Domain Tagger ──────────────────────────────────────────────────────────────
+                                                                                                                                                                               
+  def tag_rows(rows: list[dict]) -> list[dict]:
+      tagged = []
+      for row in rows:
+          pe = row['pe']
+          r = dict(row)
+                                                                                                                                                                               
+          if row['account'] == '3007D':
+              sub = GOLDEN_DOME_PE.get(pe, 'Golden Dome')                                                                                                                      
+              r.update(domain='space', sub_group=sub, category_label=sub)                                                                                                      
+                                                                                                                                                                               
+          elif pe in SPACE_SDA_PE:                                                                                                                                             
+              info = SPACE_SDA_PE[pe]                                                                                                                                          
+              r.update(domain='space', sub_group=info['sub'], category_label=info['label'])                                                                                    
+                                                                                                                                                                               
+          elif pe in EARTH_OFFENSIVE_PE:
+              info = EARTH_OFFENSIVE_PE[pe]                                                                                                                                    
+              r.update(domain='earth', sub_group=info['sub'], category_label=info['label'])
+
+          elif pe in EARTH_MDA_PE:                                                                                                                                             
+              info = EARTH_MDA_PE[pe]
+              r.update(domain='earth', sub_group=info['sub'], category_label=info['label'])                                                                                    
+                                          
+          else:
+              r.update(domain='other', sub_group=None, category_label=None)
+                                                                                                                                                                               
+          tagged.append(r)
+      return tagged                                                                                                                                                            
+                                          
+
+  # ── Aggregation ────────────────────────────────────────────────────────────────
+
+  def sum_field(rows: list[dict], field: str) -> float:                                                                                                                        
+      return sum(r.get(field, 0) for r in rows)
+                                                                                                                                                                               
+                                                                                                                                                                               
+  def group_by(rows: list[dict], key: str) -> dict[str, list[dict]]:
+      groups: dict[str, list[dict]] = defaultdict(list)                                                                                                                        
+      for r in rows:                      
+          groups[r.get(key) or 'Unknown'].append(r)                                                                                                                            
+      return dict(groups)
+                                                                                                                                                                               
+                                                                                                                                                                               
+  # ── Analysis & Report ──────────────────────────────────────────────────────────
+                                                                                                                                                                               
+  def print_section(title: str):                                                                                                                                               
+      print(f"\n{'═' * 70}")
+      print(f"  {title}")                                                                                                                                                      
+      print('═' * 70)                     
+
+                                                                                                                                                                               
+  def run_analysis(csv_path: str):
+      print("Loading data…")                                                                                                                                                   
+      raw = parse_csv(csv_path)           
+      print(f"  {len(raw):,} raw program lines parsed")
+                                                                                                                                                                               
+      deduped = dedupe_by_pe(raw)
+      print(f"  {len(deduped):,} unique PE codes after de-duplication")                                                                                                        
+                                                                                                                                                                               
+      rows = tag_rows(deduped)
+      space = [r for r in rows if r['domain'] == 'space']                                                                                                                      
+      earth = [r for r in rows if r['domain'] == 'earth']
+      tagged = [r for r in rows if r['domain'] != 'other']                                                                                                                     
+      print(f"  {len(tagged)} programs in hypersonic/missile-defense footprint")
+                                                                                                                                                                               
+      # ── Top-Line Totals ────────────────────────────────────────────────────────                                                                                            
+      print_section("TOP-LINE TOTALS  (values in $M)")                                                                                                                         
+                                                                                                                                                                               
+      for label, subset in [('Space-Focused', space), ('Earth Battlefield', earth)]:                                                                                           
+          s25 = to_m(sum_field(subset, 'fy25_total'))                                                                                                                          
+          s26 = to_m(sum_field(subset, 'fy26_total'))                                                                                                                          
+          s27 = to_m(sum_field(subset, 'fy27_total'))                                                                                                                          
+          yoy = ((s27 - s26) / s26 * 100) if s26 else 0
+          print(f"  {label:<22}  FY25: {fmt(s25)}   FY26: {fmt(s26)}   FY27: {fmt(s27)}   YoY: {yoy:+.1f}%")                                                                   
+                                                                                                                                                                               
+      total_s27 = to_m(sum_field(space, 'fy27_total'))                                                                                                                         
+      total_e27 = to_m(sum_field(earth, 'fy27_total'))                                                                                                                         
+      print(f"\n  {'COMBINED TOTAL':<22}  FY27: {fmt(total_s27 + total_e27)}")                                                                                                 
+                                                                                                                                                                               
+      # ── Space Domain Breakdown ─────────────────────────────────────────────────                                                                                            
+      print_section("SPACE-FOCUSED DOMAIN — Sub-group breakdown  (FY27, $M)")                                                                                                  
+      for sub, grp in sorted(group_by(space, 'sub_group').items()):                                                                                                            
+          total = to_m(sum_field(grp, 'fy27_total'))
+          print(f"  {sub:<45}  {fmt(total)}")                                                                                                                                  
+                                          
+      # ── Earth Battlefield Breakdown ────────────────────────────────────────────                                                                                            
+      print_section("EARTH BATTLEFIELD DOMAIN — Sub-group breakdown  (FY27, $M)")
+      for sub, grp in sorted(group_by(earth, 'sub_group').items()):                                                                                                            
+          total = to_m(sum_field(grp, 'fy27_total'))
+          print(f"  {sub:<45}  {fmt(total)}")
+
+      # ── Top 15 Programs by FY27 Request ───────────────────────────────────────                                                                                             
+      print_section("TOP 15 PROGRAMS BY FY27 TOTAL  (across both domains)")
+      top = sorted(tagged, key=lambda r: r['fy27_total'], reverse=True)[:15]                                                                                                   
+      for i, r in enumerate(top, 1):                                                                                                                                           
+          print(f"  {i:>2}. {r['title'][:52]:<52}  {fmt(to_m(r['fy27_total']))}  [{r['service']}]")                                                                            
+                                                                                                                                                                               
+      # ── Service Breakdown ──────────────────────────────────────────────────────
+      print_section("BY SERVICE — FY27 Total  (tagged programs only, $M)")                                                                                                     
+      svc_groups = group_by(tagged, 'service')                                                                                                                                 
+      ranked = sorted(svc_groups.items(), key=lambda kv: sum_field(kv[1], 'fy27_total'), reverse=True)
+      for svc, grp in ranked:                                                                                                                                                  
+          total = to_m(sum_field(grp, 'fy27_total'))
+          print(f"  {svc:<20}  {fmt(total)}  ({len(grp)} programs)")                                                                                                           
+                                          
+      # ── Year-over-Year Change per Program ─────────────────────────────────────                                                                                             
+      print_section("LARGEST FY26→FY27 INCREASES  (tagged programs, $M delta)")
+      deltas = [                                                                                                                                                               
+          (r, to_m(r['fy27_total'] - r['fy26_total']))
+          for r in tagged if r['fy26_total'] > 0                                                                                                                               
+      ]                                   
+      deltas.sort(key=lambda x: x[1], reverse=True)                                                                                                                            
+      for r, delta in deltas[:10]:                                                                                                                                             
+          print(f"  {r['title'][:52]:<52}  {delta:+.1f}M  [{r['service']}]")
+                                                                                                                                                                               
+      print_section("LARGEST FY26→FY27 DECREASES  (tagged programs, $M delta)")                                                                                                
+      for r, delta in deltas[-10:]:
+          print(f"  {r['title'][:52]:<52}  {delta:+.1f}M  [{r['service']}]")                                                                                                   
+                                          
+      # ── Golden Dome Detail ─────────────────────────────────────────────────────                                                                                            
+      gd = [r for r in space if 'Golden Dome' in (r.get('sub_group') or '')]
+      if gd:                                                                                                                                                                   
+          print_section("GOLDEN DOME FUND DETAIL  (FY27, $M)")
+          for r in sorted(gd, key=lambda x: x['fy27_total'], reverse=True):                                                                                                    
+              print(f"  {r['category_label'][:55]:<55}  {fmt(to_m(r['fy27_total']))}")                                                                                         
+          print(f"\n  {'TOTAL':<55}  {fmt(to_m(sum_field(gd, 'fy27_total')))}")                                                                                                
+                                                                                                                                                                               
+      print(f"\n{'─' * 70}")                                                                                                                                                   
+      print("  Source: DoD FY 2027 Budget Request — Exhibit R-1 RDT&E Programs")
+      print("  Values in $thousands (displayed as $M / $B)")                                                                                                                   
+      print(f"{'─' * 70}\n")              
+                                                                                                                                                                               
+                                          
+  if __name__ == '__main__':                                                                                                                                                   
+      import sys                          
+      path = sys.argv[1] if len(sys.argv) > 1 else 'public/data.csv'
+      run_analysis(path)                                                                
